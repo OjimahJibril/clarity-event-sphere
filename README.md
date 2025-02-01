@@ -6,7 +6,10 @@ A decentralized autonomous organization (DAO) platform built on Stacks for manag
 - Create and manage events with configurable parameters
 - Issue and sell event tickets as NFTs
 - DAO governance for event decisions
-- Revenue sharing among stakeholders
+- Advanced Revenue Sharing System:
+    - Configurable revenue splits between organizers, DAO, and stakeholders
+    - Staking mechanism for stakeholders
+    - Automated revenue distribution
 - Proposal creation and voting system
 
 ## Getting Started
@@ -15,8 +18,17 @@ A decentralized autonomous organization (DAO) platform built on Stacks for manag
 3. Run tests with `clarinet test`
 
 ## Contract Functions
-- create-event: Create a new event with parameters
+- create-event: Create a new event with revenue sharing parameters
 - buy-ticket: Purchase a ticket for an event
+- stake-stx: Stake STX to become a stakeholder
+- claim-revenue-share: Claim revenue share for stakeholders
 - create-proposal: Create a governance proposal
 - vote-on-proposal: Vote on an active proposal
-- distribute-revenue: Share event revenue among stakeholders
+
+## Revenue Sharing System
+The platform implements a flexible revenue sharing model where event proceeds are automatically distributed between:
+- Event organizers
+- DAO treasury
+- Stakeholders (STX stakers)
+
+Revenue shares are configured during event creation and automatically distributed after the event concludes.
