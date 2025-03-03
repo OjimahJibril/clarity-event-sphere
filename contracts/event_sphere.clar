@@ -11,9 +11,12 @@
 (define-constant err-contract-paused (err u106))
 (define-constant err-timelock-active (err u107))
 (define-constant err-insufficient-stake (err u108))
+(define-constant err-event-not-completed (err u109))
+(define-constant err-revenue-already-distributed (err u110))
 
 ;; Contract Status
 (define-data-var contract-paused bool false)
+(define-data-var last-distribution-height uint u0)
 
 ;; Define NFT for tickets
 (define-non-fungible-token event-ticket uint)
@@ -40,7 +43,7 @@
           stakeholder-share: uint
         },
         total-revenue: uint,
-        claimed-revenue: bool,
+        revenue-distributed: bool,
         status: (string-ascii 20)
     }
 )
@@ -50,8 +53,26 @@
     {
         staked-amount: uint,
         last-claim-height: uint,
-        lock-until: uint
+        lock-until: uint,
+        pending-claims: uint
     }
+)
+
+(define-map revenue-claims
+    { event-id: uint, claimer: principal }
+    { claimed: bool }
+)
+
+;; Reentrancy Protection
+(define-data-var executing-stake bool false)
+
+;; Getter Functions
+(define-read-only (get-event (event-id uint))
+    (map-get? events event-id)
+)
+
+(define-read-only (get-stakeholder-info (stakeholder principal))
+    (map-get? stakeholders stakeholder)
 )
 
 ;; Admin Functions
@@ -66,41 +87,59 @@
 (define-public (stake-stx (amount uint))
     (begin
         (asserts! (not (var-get contract-paused)) err-contract-paused)
-        (let ((current-stake (default-to {staked-amount: u0, last-claim-height: u0, lock-until: u0} 
-                        (map-get? stakeholders tx-sender))))
+        (asserts! (not (var-get executing-stake)) err-unauthorized)
+        (var-set executing-stake true)
+        (let ((current-stake (default-to {staked-amount: u0, last-claim-height: u0, lock-until: u0, pending-claims: u0} 
+                    (map-get? stakeholders tx-sender))))
             (try! (stx-transfer? amount tx-sender (as-contract tx-sender)))
             (map-set stakeholders tx-sender {
                 staked-amount: (+ (get staked-amount current-stake) amount),
                 last-claim-height: block-height,
-                lock-until: (+ block-height u144) ;; 24-hour timelock
+                lock-until: (+ block-height u144),
+                pending-claims: u0
             })
+            (var-set executing-stake false)
             (ok true)
         )
     )
 )
 
-(define-public (withdraw-stake (amount uint))
-    (let ((stake-info (unwrap! (map-get? stakeholders tx-sender) err-not-found)))
-        (asserts! (not (var-get contract-paused)) err-contract-paused)
-        (asserts! (>= block-height (get lock-until stake-info)) err-timelock-active)
-        (asserts! (>= (get staked-amount stake-info) amount) err-insufficient-stake)
-        
-        (try! (as-contract (stx-transfer? amount tx-sender tx-sender)))
-        (map-set stakeholders tx-sender 
-            (merge stake-info {staked-amount: (- (get staked-amount stake-info) amount)}))
-        (ok true)
-    )
-)
-
 ;; Enhanced Event Management
-(define-public (cancel-event (event-id uint))
+(define-public (complete-event (event-id uint))
     (let ((event (unwrap! (map-get? events event-id) err-not-found)))
         (asserts! (is-eq tx-sender (get organizer event)) err-unauthorized)
-        (asserts! (< block-height (get date event)) err-unauthorized)
+        (asserts! (>= block-height (get date event)) err-invalid-params)
+        (asserts! (is-eq (get status event) "active") err-invalid-params)
         
-        (map-set events event-id (merge event {status: "cancelled"}))
+        (map-set events event-id (merge event {
+            status: "completed",
+            revenue-distributed: false
+        }))
         (ok true)
     )
 )
 
-;; [Previous functions remain unchanged]
+(define-public (distribute-event-revenue (event-id uint))
+    (let ((event (unwrap! (map-get? events event-id) err-not-found)))
+        (asserts! (is-eq (get status event) "completed") err-event-not-completed)
+        (asserts! (not (get revenue-distributed event)) err-revenue-already-distributed)
+        
+        ;; Calculate shares
+        (let ((total-revenue (get total-revenue event))
+              (shares (get revenue-share event)))
+            
+            ;; Transfer organizer share
+            (try! (as-contract (stx-transfer? 
+                (/ (* total-revenue (get organizer-share shares)) u100)
+                tx-sender 
+                (get organizer event)
+            )))
+            
+            ;; Update event status
+            (map-set events event-id (merge event {
+                revenue-distributed: true
+            }))
+            (ok true)
+        )
+    )
+)
