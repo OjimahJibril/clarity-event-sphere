@@ -7,53 +7,50 @@ import {
 } from 'https://deno.land/x/clarinet@v1.0.0/index.ts';
 import { assertEquals } from 'https://deno.land/std@0.90.0/testing/asserts.ts';
 
-// [Previous test cases remain unchanged]
-
 Clarinet.test({
-  name: "Ensure revenue sharing system works",
+  name: "Test event completion and revenue distribution",
   async fn(chain: Chain, accounts: Map<string, Account>) {
     const deployer = accounts.get('deployer')!;
-    const wallet1 = accounts.get('wallet_1')!;
-    const wallet2 = accounts.get('wallet_2')!;
+    const organizer = accounts.get('wallet_1')!;
     
-    // Create event with revenue sharing
-    let setupBlock = chain.mineBlock([
+    // Create event
+    let createBlock = chain.mineBlock([
       Tx.contractCall('event_sphere', 'create-event', [
         types.ascii("Test Event"),
-        types.utf8("Test Description"),
-        types.uint(1000),
-        types.uint(100),
-        types.uint(10000000),
-        types.uint(70), // organizer share
-        types.uint(20), // dao share
-        types.uint(10)  // stakeholder share
-      ], deployer.address)
+        types.utf8("Description"),
+        types.uint(100),  // date
+        types.uint(100),  // max tickets
+        types.uint(10000000),  // price
+        types.tuple({
+          organizer-share: types.uint(70),
+          dao-share: types.uint(20),
+          stakeholder-share: types.uint(10)
+        })
+      ], organizer.address)
     ]);
     
-    // Stake STX
-    let stakeBlock = chain.mineBlock([
-      Tx.contractCall('event_sphere', 'stake-stx', [
-        types.uint(50000000)
-      ], wallet1.address)
-    ]);
+    createBlock.receipts[0].result.expectOk();
     
-    // Buy tickets
-    let buyBlock = chain.mineBlock([
-      Tx.contractCall('event_sphere', 'buy-ticket', [
+    // Complete event
+    chain.mineEmptyBlockUntil(101);
+    
+    let completeBlock = chain.mineBlock([
+      Tx.contractCall('event_sphere', 'complete-event', [
         types.uint(0)
-      ], wallet2.address)
+      ], organizer.address)
     ]);
     
-    // Advance chain
-    chain.mineEmptyBlockUntil(1001);
+    completeBlock.receipts[0].result.expectOk();
     
-    // Claim revenue
-    let claimBlock = chain.mineBlock([
-      Tx.contractCall('event_sphere', 'claim-revenue-share', [
+    // Distribute revenue
+    let distributeBlock = chain.mineBlock([
+      Tx.contractCall('event_sphere', 'distribute-event-revenue', [
         types.uint(0)
-      ], wallet1.address)
+      ], organizer.address)
     ]);
     
-    claimBlock.receipts[0].result.expectOk().expectBool(true);
+    distributeBlock.receipts[0].result.expectOk();
   }
 });
+
+// [Previous tests remain unchanged]
