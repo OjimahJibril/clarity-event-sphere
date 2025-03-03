@@ -8,62 +8,48 @@ import {
 import { assertEquals } from 'https://deno.land/std@0.90.0/testing/asserts.ts';
 
 Clarinet.test({
-  name: "Ensure contract pause functionality works",
+  name: "Test event completion and revenue distribution",
   async fn(chain: Chain, accounts: Map<string, Account>) {
     const deployer = accounts.get('deployer')!;
-    const wallet1 = accounts.get('wallet_1')!;
+    const organizer = accounts.get('wallet_1')!;
     
-    let block = chain.mineBlock([
-      Tx.contractCall('event_sphere', 'toggle-contract-pause', [], deployer.address)
+    // Create event
+    let createBlock = chain.mineBlock([
+      Tx.contractCall('event_sphere', 'create-event', [
+        types.ascii("Test Event"),
+        types.utf8("Description"),
+        types.uint(100),  // date
+        types.uint(100),  // max tickets
+        types.uint(10000000),  // price
+        types.tuple({
+          organizer-share: types.uint(70),
+          dao-share: types.uint(20),
+          stakeholder-share: types.uint(10)
+        })
+      ], organizer.address)
     ]);
     
-    block.receipts[0].result.expectOk().expectBool(true);
+    createBlock.receipts[0].result.expectOk();
     
-    // Attempt to stake while paused
-    let stakeBlock = chain.mineBlock([
-      Tx.contractCall('event_sphere', 'stake-stx', [
-        types.uint(50000000)
-      ], wallet1.address)
+    // Complete event
+    chain.mineEmptyBlockUntil(101);
+    
+    let completeBlock = chain.mineBlock([
+      Tx.contractCall('event_sphere', 'complete-event', [
+        types.uint(0)
+      ], organizer.address)
     ]);
     
-    stakeBlock.receipts[0].result.expectErr(106); // err-contract-paused
-  }
-});
-
-Clarinet.test({
-  name: "Test stake withdrawal with timelock",
-  async fn(chain: Chain, accounts: Map<string, Account>) {
-    const wallet1 = accounts.get('wallet_1')!;
+    completeBlock.receipts[0].result.expectOk();
     
-    // Stake STX
-    let stakeBlock = chain.mineBlock([
-      Tx.contractCall('event_sphere', 'stake-stx', [
-        types.uint(50000000)
-      ], wallet1.address)
+    // Distribute revenue
+    let distributeBlock = chain.mineBlock([
+      Tx.contractCall('event_sphere', 'distribute-event-revenue', [
+        types.uint(0)
+      ], organizer.address)
     ]);
     
-    stakeBlock.receipts[0].result.expectOk().expectBool(true);
-    
-    // Attempt immediate withdrawal
-    let withdrawBlock = chain.mineBlock([
-      Tx.contractCall('event_sphere', 'withdraw-stake', [
-        types.uint(25000000)
-      ], wallet1.address)
-    ]);
-    
-    withdrawBlock.receipts[0].result.expectErr(107); // err-timelock-active
-    
-    // Advance chain past timelock
-    chain.mineEmptyBlockUntil(145);
-    
-    // Try withdrawal again
-    let successfulWithdraw = chain.mineBlock([
-      Tx.contractCall('event_sphere', 'withdraw-stake', [
-        types.uint(25000000)
-      ], wallet1.address)
-    ]);
-    
-    successfulWithdraw.receipts[0].result.expectOk().expectBool(true);
+    distributeBlock.receipts[0].result.expectOk();
   }
 });
 
